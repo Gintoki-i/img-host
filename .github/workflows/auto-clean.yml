@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGEDIR: img           # 你的图片目录
-      KEEP_DAYS: "10"         # 保留天数（含当天）
+      KEEP_DAYS: "0"         # 保留天数（含当天）
       TZ: Asia/Shanghai       # 北京时间
     steps:
       - name: Checkout repo
