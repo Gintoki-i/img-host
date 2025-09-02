@@ -1,0 +1,84 @@
+name: Daily clean images (keep last 10 days by filename timestamp, CST)
+
+on:
+  schedule:
+    - cron: "0 23 * * *"   # UTC 23:00 = 北京时间(UTC+8) 次日 07:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    env:
+      IMAGEDIR: img           # 你的图片目录
+      KEEP_DAYS: "10"         # 保留天数（含当天）
+      TZ: Asia/Shanghai       # 北京时间
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Remove files older than KEEP_DAYS (by filename timestamp, CST)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$IMAGEDIR"
+          mkdir -p "$dir"
+
+          TODAY=$(date +%Y-%m-%d)
+          NOW_TS=$(date -d "$TODAY 00:00:00" +%s)
+
+          echo "Scan dir: $dir"
+          echo "Today (CST): $TODAY"
+          echo "Keep last $KEEP_DAYS day(s) including today"
+
+          deleted=0
+          kept=0
+
+          shopt -s nullglob
+          for f in "$dir"/*; do
+            [ -f "$f" ] || continue
+            base="$(basename "$f")"
+
+            # 匹配前缀：14~17位数字 + 连字符，例如 20250902105059-xxx.jpg 或 20250902105059123-xxx.jpg
+            if [[ "$base" =~ ^([0-9]{14,17})- ]]; then
+              ts_prefix="${BASH_REMATCH[1]}"
+              # 取前14位作为到秒的时间（YYYYMMDDHHMMSS）
+              ts14="${ts_prefix:0:14}"
+              # 格式化为 "YYYY-MM-DD HH:MM:SS"
+              ts_fmt="${ts14:0:4}-${ts14:4:2}-${ts14:6:2} ${ts14:8:2}:${ts14:10:2}:${ts14:12:2}"
+              # 解析为时间戳（CST）
+              if F_TS=$(date -d "$ts_fmt" +%s 2>/dev/null); then
+                AGE_DAYS=$(( (NOW_TS - F_TS) / 86400 ))
+                if [ "$AGE_DAYS" -ge "$KEEP_DAYS" ]; then
+                  echo "Deleting $base (age ${AGE_DAYS}d)"
+                  rm -f -- "$f"
+                  deleted=$((deleted+1))
+                else
+                  # echo "Keeping  $base (age ${AGE_DAYS}d)"
+                  kept=$((kept+1))
+                fi
+              else
+                echo "Skip unparsable time: $base"
+              fi
+            else
+              echo "Skip non-timestamped file: $base"
+            fi
+          done
+
+          echo "Kept files: $kept"
+          echo "Deleted files: $deleted"
+
+      - name: Commit & push if changes
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: clean old images by filename timestamp (keep last ${KEEP_DAYS} days)"
+            git push
+          else
+            echo "No changes to commit."
+          fi
