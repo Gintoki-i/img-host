@@ -1,0 +1,86 @@
+name: Purge timestamped images (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type YES to confirm deletion'
+        required: true
+        default: 'NO'
+      directory:
+        description: 'Image directory to scan'
+        required: false
+        default: 'img'
+      dry_run:
+        description: 'true = list only, false = delete'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Delete timestamped files
+        shell: bash
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+          IMAGEDIR: ${{ github.event.inputs.directory }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${CONFIRM}" != "YES" ]]; then
+            echo "Confirmation not provided (type YES). Aborting."
+            exit 1
+          fi
+
+          dir="${IMAGEDIR:-img}"
+          mkdir -p "$dir"
+          echo "Scan dir: $dir"
+          echo "DRY_RUN: $DRY_RUN (true=list only, false=delete)"
+
+          shopt -s nullglob
+          deleted=0
+          matched=0
+
+          # 匹配：前缀14~17位数字 + 连字符，例如：
+          # 20250902105059-foo.jpg 或 20250902105059123-bar.png
+          regex='^([0-9]{14,17})-.*\.[^.]+$'
+
+          for f in "$dir"/*; do
+            [[ -f "$f" ]] || continue
+            base="$(basename "$f")"
+            if [[ "$base" =~ $regex ]]; then
+              matched=$((matched+1))
+              if [[ "${DRY_RUN}" == "false" ]]; then
+                echo "Deleting: $base"
+                rm -f -- "$f"
+                deleted=$((deleted+1))
+              else
+                echo "[DRY RUN] Would delete: $base"
+              fi
+            fi
+          done
+
+          echo "Matched files: $matched"
+          echo "Deleted files: $deleted"
+
+      - name: Commit & push if changes
+        if: ${{ github.event.inputs.dry_run == 'false' }}
+        shell: bash
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: purge timestamped images"
+            git push
+          else
+            echo "No changes to commit."
+          fi
