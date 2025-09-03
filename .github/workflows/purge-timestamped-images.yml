@@ -1,4 +1,4 @@
-name: Purge timestamped images (manual)
+name: Purge images (manual, recursive)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         default: 'NO'
       directory:
-        description: 'Image directory to scan'
+        description: 'Root directory to scan (e.g., img)'
         required: false
         default: 'img'
       dry_run:
@@ -26,11 +26,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Delete timestamped files
+      - name: Delete all image files (recursive)
         shell: bash
         env:
           CONFIRM: ${{ github.event.inputs.confirm }}
-          IMAGEDIR: ${{ github.event.inputs.directory }}
+          ROOTDIR: ${{ github.event.inputs.directory }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -40,36 +40,32 @@ jobs:
             exit 1
           fi
 
-          dir="${IMAGEDIR:-img}"
+          dir="${ROOTDIR:-img}"
           mkdir -p "$dir"
-          echo "Scan dir: $dir"
+          echo "Scan root: $dir"
           echo "DRY_RUN: $DRY_RUN (true=list only, false=delete)"
 
-          shopt -s nullglob
-          deleted=0
+          # 允许的图片扩展名（大小写不敏感）
+          exts='jpg|jpeg|png|webp|gif|bmp|tiff|tif|svg'
+
           matched=0
+          deleted=0
 
-          # 匹配：前缀14~17位数字 + 连字符，例如：
-          # 20250902105059-foo.jpg 或 20250902105059123-bar.png
-          regex='^([0-9]{14,17})-.*\.[^.]+$'
-
-          for f in "$dir"/*; do
-            [[ -f "$f" ]] || continue
+          # 递归查找所有图片文件
+          while IFS= read -r -d '' f; do
             base="$(basename "$f")"
-            if [[ "$base" =~ $regex ]]; then
-              matched=$((matched+1))
-              if [[ "${DRY_RUN}" == "false" ]]; then
-                echo "Deleting: $base"
-                rm -f -- "$f"
-                deleted=$((deleted+1))
-              else
-                echo "[DRY RUN] Would delete: $base"
-              fi
+            matched=$((matched+1))
+            if [[ "${DRY_RUN}" == "false" ]]; then
+              echo "Deleting: $f"
+              rm -f -- "$f"
+              deleted=$((deleted+1))
+            else
+              echo "[DRY RUN] Would delete: $f"
             fi
-          done
+          done < <(find "$dir" -type f -iregex ".*\.(${exts})$" -print0)
 
-          echo "Matched files: $matched"
-          echo "Deleted files: $deleted"
+          echo "Matched images: $matched"
+          echo "Deleted images: $deleted"
 
       - name: Commit & push if changes
         if: ${{ github.event.inputs.dry_run == 'false' }}
@@ -79,7 +75,7 @@ jobs:
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add -A
-            git commit -m "chore: purge timestamped images"
+            git commit -m "chore: purge all images under ${{ github.event.inputs.directory }}"
             git push
           else
             echo "No changes to commit."
