@@ -62,7 +62,8 @@ jobs:
             else
               echo "[DRY RUN] Would delete: $f"
             fi
-          done < <(find "$dir" -type f -iregex ".*\.(${exts})$" -print0)
+          find "$dir" -type f ( -iname '*.jpg'  -o -iname '*.jpeg' -o -iname '*.png'  -o -iname '*.webp'    -o -iname '*.gif' -o -iname '*.bmp'  -o -iname '*.tiff' -o -iname '*.tif' -o -iname '*.svg' \) -print0
+
 
           echo "Matched images: $matched"
           echo "Deleted images: $deleted"
