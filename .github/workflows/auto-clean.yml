@@ -18,6 +18,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Configure Git for special characters
+        run: |
+          git config --global core.precomposeunicode true
+          git config --global core.quotepath off
+
       - name: Delete all images recursively
         shell: bash
         run: |
@@ -31,27 +36,40 @@ jobs:
 
           matched=0
           deleted=0
+          failed=0
 
-          # 递归查找并删除
+          # 递归查找并删除，增加错误处理
           while IFS= read -r -d '' f; do
             matched=$((matched+1))
-            echo "Deleting: $f"
-            rm -f -- "$f"
-            deleted=$((deleted+1))
+            echo "Attempting to delete: $f"
+            if rm -f -- "$f"; then
+              deleted=$((deleted+1))
+              echo "Deleted: $f"
+            else
+              failed=$((failed+1))
+              echo "Failed to delete: $f"
+            fi
           done < <(find "$dir" -type f -iregex ".*\.(${exts})$" -print0)
 
           echo "Matched images: $matched"
           echo "Deleted images: $deleted"
+          echo "Failed to delete: $failed"
 
       - name: Commit & push if changes
         shell: bash
         run: |
+          # 检查是否有更改
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            
+            # 配置Git处理大文件和特殊字符
+            git config core.longpaths true
+            
             git add -A
             git commit -m "chore: purge all images under ${IMAGEDIR}"
             git push
           else
             echo "No changes to commit."
           fi
+    
