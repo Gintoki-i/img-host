@@ -26,6 +26,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Configure Git for special characters and long paths
+        run: |
+          git config --global core.precomposeunicode true
+          git config --global core.quotepath off
+          git config --global core.longpaths true
+
       - name: Delete all image files (recursive)
         shell: bash
         env:
@@ -46,27 +52,41 @@ jobs:
           echo "DRY_RUN: $DRY_RUN (true=list only, false=delete)"
 
           # 允许的图片扩展名（大小写不敏感）
-          exts='jpg|jpeg|png|webp|gif|bmp|tiff|tif|svg'
+          exts=("jpg" "jpeg" "png" "webp" "gif" "bmp" "tiff" "tif" "svg")
+          
+          # 构建find命令的条件表达式
+          find_args=()
+          for ext in "${exts[@]}"; do
+            if [ ${#find_args[@]} -eq 0 ]; then
+              find_args+=(-iname "*.$ext")
+            else
+              find_args+=(-o -iname "*.$ext")
+            fi
+          done
 
           matched=0
           deleted=0
+          failed=0
 
           # 递归查找所有图片文件
           while IFS= read -r -d '' f; do
-            base="$(basename "$f")"
             matched=$((matched+1))
             if [[ "${DRY_RUN}" == "false" ]]; then
               echo "Deleting: $f"
-              rm -f -- "$f"
-              deleted=$((deleted+1))
+              if rm -f -- "$f"; then
+                deleted=$((deleted+1))
+              else
+                failed=$((failed+1))
+                echo "Failed to delete: $f"
+              fi
             else
               echo "[DRY RUN] Would delete: $f"
             fi
-          find "$dir" -type f ( -iname '*.jpg'  -o -iname '*.jpeg' -o -iname '*.png'  -o -iname '*.webp'    -o -iname '*.gif' -o -iname '*.bmp'  -o -iname '*.tiff' -o -iname '*.tif' -o -iname '*.svg' \) -print0
-
+          done < <(find "$dir" -type f \( "${find_args[@]}" \) -print0)
 
           echo "Matched images: $matched"
           echo "Deleted images: $deleted"
+          echo "Failed to delete: $failed"
 
       - name: Commit & push if changes
         if: ${{ github.event.inputs.dry_run == 'false' }}
@@ -75,9 +95,12 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            # 再次确认长路径配置
+            git config core.longpaths true
             git add -A
             git commit -m "chore: purge all images under ${{ github.event.inputs.directory }}"
             git push
           else
             echo "No changes to commit."
           fi
+    
