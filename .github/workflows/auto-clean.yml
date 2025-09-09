@@ -8,68 +8,82 @@ on:
 permissions:
   contents: write
 
+env:
+  IMAGEDIR: img
+  TZ: Asia/Shanghai
+  IMAGE_EXTS: >-
+    jpg|jpeg|png|webp|gif|bmp|tiff|tif|svg|svgz|ico|avif|heic|heif|jp2|j2k|jpf|jpx|jpm|apng
+
 jobs:
   clean:
     runs-on: ubuntu-latest
-    env:
-      IMAGEDIR: img           # 根目录（会递归扫描）
-      TZ: Asia/Shanghai       # 北京时间
     steps:
-      - name: Checkout repo
+      - name: Checkout repo on branch
         uses: actions/checkout@v4
+        with:
+          # 对 schedule：这是默认分支；对手动：就是你点运行时的分支
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Configure Git for special characters
+      - name: Configure Git
         run: |
           git config --global core.precomposeunicode true
           git config --global core.quotepath off
+          git config --global pull.rebase true
+          git config core.longpaths true
 
-      - name: Delete all images recursively
+      - name: Purge tracked images (git rm)
         shell: bash
         run: |
           set -euo pipefail
           dir="$IMAGEDIR"
+          exts="${IMAGE_EXTS}"
           mkdir -p "$dir"
-          echo "Scan root: $dir"
 
-          # 常见图片扩展名（大小写不敏感），按需增减
-          exts='jpg|jpeg|png|webp|gif|bmp|tiff|tif|svg'
+          # 只处理 img/ 下已被 Git 跟踪的图片
+          git ls-files -z "$dir" \
+            | grep -ziE "\.(${exts})$" \
+            | xargs -0r git rm -qf --ignore-unmatch
 
-          matched=0
-          deleted=0
-          failed=0
+      - name: Purge untracked images (filesystem)
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$IMAGEDIR"
+          exts="${IMAGE_EXTS}"
+          matched=0 deleted=0 failed=0
 
-          # 递归查找并删除，增加错误处理
           while IFS= read -r -d '' f; do
             matched=$((matched+1))
-            echo "Attempting to delete: $f"
             if rm -f -- "$f"; then
-              deleted=$((deleted+1))
-              echo "Deleted: $f"
+              deleted=$((deleted+1)); echo "Deleted: $f"
             else
-              failed=$((failed+1))
-              echo "Failed to delete: $f"
+              failed=$((failed+1));  echo "Failed:  $f"
             fi
-          done < <(find "$dir" -type f -iregex ".*\.(${exts})$" -print0)
+          done < <(find -L "$dir" -type f -iregex ".*\.(${exts})$" -print0)
 
           echo "Matched images: $matched"
           echo "Deleted images: $deleted"
           echo "Failed to delete: $failed"
 
+          # 清空空目录（保留 .gitkeep 等可选）
+          find "$dir" -type d -empty -not -path '*/.git/*' -delete || true
+
       - name: Commit & push if changes
         shell: bash
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
-          # 检查是否有更改
           if [ -n "$(git status --porcelain)" ]; then
+            git pull --rebase origin "$BRANCH" || true
+
             git config user.name  "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            
-            # 配置Git处理大文件和特殊字符
-            git config core.longpaths true
-            
+
             git add -A
             git commit -m "chore: purge all images under ${IMAGEDIR}"
-            git push
+            git push origin "$BRANCH"
           else
             echo "No changes to commit."
           fi
-    
