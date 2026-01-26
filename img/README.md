@@ -1,0 +1,22 @@
+from github_image_host import GitHubImageHost
+
+host = GitHubImageHost(
+    owner="Gintoki-i",
+    repo="img-host",
+    subdir="img/",
+)
+
+# 上传
+url = host.upload("a.png")
+
+# 更新
+host.update("new_a.png", "a.png")
+
+# 删除
+host.delete("a.png")
+
+# 批量上传
+host.upload_many(["1.png", "2.jpg"])
+
+# 清空目录但保留 .gitkeep
+host.clear_dir(keep={".gitkeep"})
